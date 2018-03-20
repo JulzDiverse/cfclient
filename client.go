@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 
@@ -277,7 +276,7 @@ func (c *Client) DoRequest(r *request) (*http.Response, error) {
 }
 
 func (c *Client) DoHttpRequest(req *http.Request) (*http.Response, error) {
-	//req.Header.Set("User-Agent", c.Config.UserAgent)
+	req.Header.Set("User-Agent", c.Config.UserAgent)
 	resp, err := c.Config.HttpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -413,83 +412,4 @@ func (c *Client) GetAppBitsByDownloadUrl(downloadUrl string) (*http.Response, er
 	//}
 
 	return resp, nil
-}
-
-func (c *Client) UploadDropletByAppGuid(guid string, body io.Reader, size int64) error {
-	err := c.setDroplet(guid, body, size)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (c *Client) setDroplet(guid string, droplet io.Reader, size int64) error {
-	fieldname := "droplet"
-	filename := "droplet.tgz"
-
-	// This is necessary because (similar to S3) CC does not accept chunked multipart MIME
-	contentLength := emptyMultipartSize(fieldname, filename) + size
-
-	readBody, writeBody := io.Pipe()
-	defer readBody.Close()
-
-	form := multipart.NewWriter(writeBody)
-	errChan := make(chan error, 1)
-	go func() {
-		defer writeBody.Close()
-
-		dropletPart, err := form.CreateFormFile(fieldname, filename)
-		if err != nil {
-			errChan <- err
-			return
-		}
-		if _, err := io.CopyN(dropletPart, droplet, size); err != nil {
-			errChan <- err
-			return
-		}
-		errChan <- form.Close()
-	}()
-
-	fmt.Println("Start running upload job")
-	if err := c.runJob(guid, readBody, form.FormDataContentType(), contentLength); err != nil {
-		<-errChan
-		return err
-	}
-
-	fmt.Println("Waiting for form file to be closed")
-	return <-errChan
-}
-
-func emptyMultipartSize(fieldname, filename string) int64 {
-	body := &bytes.Buffer{}
-	form := multipart.NewWriter(body)
-	form.CreateFormFile(fieldname, filename)
-	form.Close()
-	return int64(body.Len())
-}
-
-func (c *Client) runJob(guid string, body io.Reader, contentType string, contentLength int64) error {
-	fmt.Println("Execute upload request")
-	r := c.NewRequest("PUT", fmt.Sprintf("/v2/apps/%s/upload", guid))
-	req, err := r.toHTTP()
-	if err != nil {
-		return errors.Wrap(err, "failed to create HTTP request")
-	}
-
-	req.Header.Set("Content-Type", contentType)
-	req.ContentLength = contentLength
-
-	resp, err := c.DoHttpRequest(req)
-	if err != nil {
-		return err
-	}
-
-	if resp.StatusCode >= 400 {
-		return errors.New(fmt.Sprintf("upload-request-failed-with:%s", resp.StatusCode))
-	}
-
-	fmt.Println("Request-Successful:", resp.StatusCode)
-
-	return nil
 }
