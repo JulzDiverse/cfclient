@@ -10,11 +10,14 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"time"
 )
 
-func (c *Client) PushDroplet(name string, guid string) error {
-	droplet, size, err := c.readFile(fmt.Sprintf("/out/%s.tgz", name))
+func (c *Client) PushDroplet(path string, guid string) error {
+	name := filepath.Base(path)
+
+	droplet, size, err := c.readFile(path)
 	if err != nil {
 		return err
 	}
@@ -38,9 +41,10 @@ func (c *Client) openFile(path string, flag int, perm os.FileMode) (*os.File, in
 	return file, fileInfo.Size(), nil
 }
 
-func (c *Client) setDroplet(name, guid string, droplet io.Reader, size int64) error {
+func (c *Client) setDroplet(filename, guid string, droplet io.Reader, size int64) error {
 	fieldname := "droplet"
-	filename := fmt.Sprintf("%s.tgz", name)
+	extension := filepath.Ext(filename)
+	name := filename[0 : len(filename)-len(extension)]
 
 	// This is necessary because (similar to S3) CC does not accept chunked multipart MIME
 	contentLength := emptyMultipartSize(fieldname, filename) + size
